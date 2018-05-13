@@ -169,7 +169,6 @@ tf_cuda_library(
         ":grpc_worker_service_impl",
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
-        "//tensorflow/core:gpu_runtime",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:worker_proto_cc",
@@ -189,7 +188,7 @@ cc_library(
     srcs = ["grpc_worker_service_impl.cc"],
     hdrs = ["grpc_worker_service_impl.h"],
     deps = [
-        ":grpc_serialization_traits",
+        ":grpc_util",
         "//tensorflow/core:worker_proto_cc",
         "//tensorflow/core/distributed_runtime:tensor_coding",
         "@grpc//:grpc++_unsecure",
@@ -235,19 +234,8 @@ cc_library(
     srcs = ["grpc_master_service_impl.cc"],
     hdrs = ["grpc_master_service_impl.h"],
     deps = [
-        ":grpc_serialization_traits",
         "//tensorflow/core:master_proto_cc",
         "@grpc//:grpc++_unsecure",
-    ],
-)
-
-cc_library(
-    name = "grpc_serialization_traits",
-    srcs = [],
-    hdrs = ["grpc_serialization_traits.h"],
-    deps = [
-        "@grpc//:grpc++_unsecure",
-        "@grpc//:grpc_unsecure",
     ],
 )
 

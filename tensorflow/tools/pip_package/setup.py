@@ -22,7 +22,9 @@ import os
 import re
 import sys
 
-from setuptools import find_packages, setup, Command
+from setuptools import Command
+from setuptools import find_packages
+from setuptools import setup
 from setuptools.command.install import install as InstallCommandBase
 from setuptools.dist import Distribution
 
@@ -67,7 +69,7 @@ else:
 if 'tf_nightly' in project_name:
   for i, pkg in enumerate(REQUIRED_PACKAGES):
     if 'tensorboard' in pkg:
-      REQUIRED_PACKAGES[i] = 'tb-nightly >= 1.8.0a0, < 1.9.0a0'
+      REQUIRED_PACKAGES[i] = 'tb-nightly >= 1.9.0a0, < 1.10.0a0'
       break
 
 # weakref.finalize and enum were introduced in Python 3.4
@@ -97,7 +99,9 @@ TEST_PACKAGES = [
     'scipy >= 0.15.1',
 ]
 
+
 class BinaryDistribution(Distribution):
+
   def has_ext_modules(self):
     return True
 
@@ -179,9 +183,9 @@ class InstallHeaders(Command):
 
 def find_files(pattern, root):
   """Return all the files matching pattern below root dir."""
-  for path, _, files in os.walk(root):
+  for dirpath, _, files in os.walk(root):
     for filename in fnmatch.filter(files, pattern):
-      yield os.path.join(path, filename)
+      yield os.path.join(dirpath, filename)
 
 
 matches = ['../' + x for x in find_files('*', 'external') if '.py' not in x]

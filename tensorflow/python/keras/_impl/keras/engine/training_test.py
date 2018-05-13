@@ -23,14 +23,18 @@ import unittest
 
 import numpy as np
 
+from tensorflow.python.data.ops import dataset_ops
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import test_util as tf_test_util
 from tensorflow.python.keras._impl import keras
 from tensorflow.python.keras._impl.keras import testing_utils
 from tensorflow.python.keras._impl.keras.engine.training_utils import weighted_masked_objective
 from tensorflow.python.keras._impl.keras.utils.generic_utils import slice_arrays
+from tensorflow.python.ops import array_ops
 from tensorflow.python.platform import test
+from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.training.rmsprop import RMSPropOptimizer
-
 
 try:
   import scipy.sparse as scipy_sparse  # pylint: disable=g-import-not-at-top
@@ -1143,6 +1147,21 @@ class TestTrainingWithDataTensors(test.TestCase):
                 epochs=1, steps_per_epoch=2, verbose=0,
                 validation_data=(inputs, targets), validation_steps=2)
 
+      # Test with dynamic shape
+      inputs = array_ops.placeholder_with_default(
+          np.zeros((2, 3)), shape=tensor_shape.TensorShape([None, 3]))
+      targets = array_ops.placeholder_with_default(
+          np.zeros((2, 4)), shape=tensor_shape.TensorShape([None, 4]))
+      self.assertEqual(inputs.shape[0].value, None)
+      model.fit(inputs, targets, epochs=1, steps_per_epoch=2, verbose=0)
+      model.evaluate(inputs, targets, steps=2, verbose=0)
+      model.predict(inputs, steps=2)
+      model.train_on_batch(inputs, targets)
+      model.test_on_batch(inputs, targets)
+      model.fit(inputs, targets,
+                epochs=1, steps_per_epoch=2, verbose=0,
+                validation_data=(inputs, targets), validation_steps=2)
+
   def test_training_and_eval_methods_on_symbolic_tensors_multi_io(self):
     with self.test_session():
       a = keras.layers.Input(shape=(3,), name='input_a')
@@ -1322,16 +1341,12 @@ class TestTrainingWithDataTensors(test.TestCase):
                                  output_a_np)
 
       # test fit
-      out = model.fit(None,
-                      output_a_np, epochs=1, batch_size=10)
-      out = model.fit(None,
-                      output_a_np, epochs=1, batch_size=10)
+      _ = model.fit(None, output_a_np, epochs=1, steps_per_epoch=3)
+      _ = model.fit(None, output_a_np, epochs=1, steps_per_epoch=3)
 
       # test evaluate
-      out = model.evaluate(None,
-                           output_a_np, batch_size=10)
-      out = model.evaluate(None,
-                           output_a_np, batch_size=10)
+      _ = model.evaluate(None, output_a_np, steps=3)
+      _ = model.evaluate(None, output_a_np, steps=3)
 
       # test predict
       out = model.predict(None, steps=3)
@@ -1365,16 +1380,12 @@ class TestTrainingWithDataTensors(test.TestCase):
                                  output_a_np)
 
       # test fit
-      out = model.fit(None,
-                      output_a_np, epochs=1, batch_size=10)
-      out = model.fit(None,
-                      output_a_np, epochs=1, batch_size=10)
+      _ = model.fit(None, output_a_np, epochs=1, steps_per_epoch=10)
+      _ = model.fit(None, output_a_np, epochs=1, steps_per_epoch=10)
 
       # test evaluate
-      out = model.evaluate(None,
-                           output_a_np, batch_size=10)
-      out = model.evaluate(None,
-                           output_a_np, batch_size=10)
+      _ = model.evaluate(None, output_a_np, steps=10)
+      _ = model.evaluate(None, output_a_np, steps=10)
 
       # test predict
       out = model.predict(None, steps=3)
@@ -1694,14 +1705,128 @@ class TestTrainingWithDataTensors(test.TestCase):
                               'dropout_acc']
     self.assertEqual(reference_metric_names, model.metrics_names)
 
-if __name__ == '__main__':
-  # Bazel sets these environment variables to very long paths.
-  # Tempfile uses them to create long paths, and in turn multiprocessing
-  # library tries to create sockets named after paths. Delete whatever bazel
-  # writes to these to avoid tests failing due to socket addresses being too
-  # long.
-  for var in ('TMPDIR', 'TMP', 'TEMP'):
-    if var in os.environ:
-      del os.environ[var]
 
+class TestTrainingWithDatasetIterators(test.TestCase):
+
+  @tf_test_util.run_in_graph_and_eager_modes()
+  def test_training_and_eval_methods_on_iterators_single_io(self):
+    with self.test_session():
+      x = keras.layers.Input(shape=(3,), name='input')
+      y = keras.layers.Dense(4, name='dense')(x)
+      model = keras.Model(x, y)
+
+      optimizer = RMSPropOptimizer(learning_rate=0.001)
+      loss = 'mse'
+      metrics = ['mae']
+      model.compile(optimizer, loss, metrics=metrics)
+
+      inputs = np.zeros((10, 3), dtype=np.float32)
+      targets = np.zeros((10, 4), dtype=np.float32)
+      dataset = dataset_ops.Dataset.from_tensor_slices((inputs, targets))
+      dataset = dataset.repeat(100)
+      dataset = dataset.batch(10)
+      iterator = dataset.make_one_shot_iterator()
+
+      model.fit(iterator, epochs=1, steps_per_epoch=2, verbose=1)
+      model.evaluate(iterator, steps=2, verbose=1)
+      model.predict(iterator, steps=2)
+      model.train_on_batch(iterator)
+      model.test_on_batch(iterator)
+      model.predict_on_batch(iterator)
+
+      # Test with validation data
+      model.fit(iterator,
+                epochs=1, steps_per_epoch=2, verbose=0,
+                validation_data=iterator, validation_steps=2)
+      # Test with validation split
+      with self.assertRaisesRegexp(
+          ValueError, '`validation_split` argument is not supported '
+          'when input `x` is a dataset iterator'):
+        model.fit(iterator,
+                  epochs=1, steps_per_epoch=2, verbose=0,
+                  validation_split=0.5, validation_steps=2)
+
+      # Test with sample weight.
+      sample_weight = np.random.random((10,))
+      with self.assertRaisesRegexp(
+          ValueError, '`sample_weight` argument is not supported '
+          'when input `x` is a dataset iterator'):
+        model.fit(
+            iterator,
+            epochs=1,
+            steps_per_epoch=2,
+            verbose=0,
+            sample_weight=sample_weight)
+
+      # Test invalid usage
+      with self.assertRaisesRegexp(ValueError,
+                                   'Instead, pass an `Iterator`'):
+        model.fit(dataset,
+                  epochs=1, steps_per_epoch=2, verbose=0)
+      with self.assertRaisesRegexp(ValueError,
+                                   'you should not specify a target'):
+        model.fit(iterator, iterator,
+                  epochs=1, steps_per_epoch=2, verbose=0)
+
+      with self.assertRaisesRegexp(
+          ValueError, 'you should specify the `steps_per_epoch` argument'):
+        model.fit(iterator, epochs=1, verbose=0)
+      with self.assertRaisesRegexp(ValueError,
+                                   'you should specify the `steps` argument'):
+        model.evaluate(iterator, verbose=0)
+      with self.assertRaisesRegexp(ValueError,
+                                   'you should specify the `steps` argument'):
+        model.predict(iterator, verbose=0)
+
+  def test_get_next_op_created_once(self):
+    with self.test_session():
+      x = keras.layers.Input(shape=(3,), name='input')
+      y = keras.layers.Dense(4, name='dense')(x)
+      model = keras.Model(x, y)
+
+      optimizer = RMSPropOptimizer(learning_rate=0.001)
+      loss = 'mse'
+      metrics = ['mae']
+      model.compile(optimizer, loss, metrics=metrics)
+
+      inputs = np.zeros((10, 3), dtype=np.float32)
+      targets = np.zeros((10, 4), dtype=np.float32)
+      dataset = dataset_ops.Dataset.from_tensor_slices((inputs, targets))
+      dataset = dataset.repeat(100)
+      dataset = dataset.batch(10)
+      iterator = dataset.make_one_shot_iterator()
+
+      model.fit(iterator, epochs=1, steps_per_epoch=2, verbose=1)
+      # Finalize graph to make sure we are not appending another iterator
+      # get_next op in the graph.
+      ops.get_default_graph().finalize()
+      model.fit(iterator, epochs=1, steps_per_epoch=2, verbose=1)
+
+  @tf_test_util.run_in_graph_and_eager_modes()
+  def test_iterators_running_out_of_data(self):
+    with self.test_session():
+      x = keras.layers.Input(shape=(3,), name='input')
+      y = keras.layers.Dense(4, name='dense')(x)
+      model = keras.Model(x, y)
+
+      optimizer = RMSPropOptimizer(learning_rate=0.001)
+      loss = 'mse'
+      metrics = ['mae']
+      model.compile(optimizer, loss, metrics=metrics)
+
+      inputs = np.zeros((10, 3), dtype=np.float32)
+      targets = np.zeros((10, 4), dtype=np.float32)
+      dataset = dataset_ops.Dataset.from_tensor_slices((inputs, targets))
+      dataset = dataset.repeat(2)
+      dataset = dataset.batch(10)
+      iterator = dataset.make_one_shot_iterator()
+
+      with test.mock.patch.object(logging, 'warning') as mock_log:
+        model.fit(iterator, epochs=1, steps_per_epoch=3, verbose=0)
+        self.assertRegexpMatches(
+            str(mock_log.call_args),
+            'dataset iterator ran out of data')
+
+
+if __name__ == '__main__':
   test.main()

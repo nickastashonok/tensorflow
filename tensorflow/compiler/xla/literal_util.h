@@ -74,6 +74,10 @@ class Literal {
   Literal(const Literal& other) = delete;
   Literal& operator=(const Literal& other) = delete;
   Literal(Literal&& other);
+  // 'allocate_arrays' indicates whether to allocate memory for the arrays in
+  // the shape. If false, buffer pointers inside of the Literal::Pieces are set
+  // to nullptr.
+  Literal(const Shape& shape, bool allocate_arrays);
   Literal& operator=(Literal&& other);
 
   // Literals are equal if they have compatible shapes and the same data
@@ -282,7 +286,7 @@ class Literal {
 
   // Creates a new value that has the equivalent value as this literal, but
   // conforms to new_layout; e.g. a literal matrix that was in {0, 1}
-  // minor-to-major dimension layout can be re-layed-out as {1, 0}
+  // minor-to-major dimension layout can be re-laid-out as {1, 0}
   // minor-to-major dimension layout and the value in the cell at any given
   // logical index (i0, i1) will be the same.
   //
@@ -658,12 +662,11 @@ class Literal {
   // LayoutUtil::MaxSparseElements(SetSubshape(shape(), index).layout()).
   int64 sparse_element_count() const;
 
- protected:
-  // 'allocate_arrays' indicates whether to allocate memory for the arrays in
-  // the shape. If false, buffer pointers inside of the Literal::Pieces are set
-  // to nullptr.
-  Literal(const Shape& shape, bool allocate_arrays);
+  // Compute a hash for this literal.  This literal must not be a sparse tensor
+  // or a tuple containing a sparse tensor.
+  size_t Hash() const;
 
+ protected:
   // Internal template helper for the Literal::CopySliceFrom(), matching its
   // arguments one by one.
   template <typename NativeT>
@@ -741,7 +744,13 @@ class Literal {
     int64 size_bytes() const { return ShapeUtil::ByteSizeOf(subshape()); }
 
     // Returns the number of elements in this piece's array.
-    int64 element_count() const { return ShapeUtil::ElementsIn(subshape()); }
+    int64 element_count() const {
+      // If this is a sparse array, use the number of elements represented by
+      // the indices in the associated SparseIndexArray.
+      return LayoutUtil::IsSparseArray(subshape())
+                 ? sparse_indices()->index_count()
+                 : ShapeUtil::ElementsIn(subshape());
+    }
 
     // Copy the data from 'src' into this piece's buffer. Shapes of this piece
     // and src must be compatible.
@@ -853,8 +862,7 @@ tensorflow::gtl::ArraySlice<NativeT> Literal::Piece::data() const {
       << " type, but literal element type is "
       << PrimitiveType_Name(subshape().element_type());
   return tensorflow::gtl::ArraySlice<NativeT>(
-      reinterpret_cast<const NativeT*>(buffer()),
-      ShapeUtil::ElementsIn(subshape()));
+      reinterpret_cast<const NativeT*>(buffer()), element_count());
 }
 
 template <typename NativeT>
@@ -867,7 +875,7 @@ tensorflow::gtl::MutableArraySlice<NativeT> Literal::Piece::data() {
       << " type, but literal element type is "
       << PrimitiveType_Name(subshape().element_type());
   return tensorflow::gtl::MutableArraySlice<NativeT>(
-      reinterpret_cast<NativeT*>(buffer()), ShapeUtil::ElementsIn(subshape()));
+      reinterpret_cast<NativeT*>(buffer()), element_count());
 }
 
 template <typename NativeT>
@@ -1282,12 +1290,13 @@ void Literal::PopulateSparse(SparseIndexArray indices,
   CHECK_LE(num_elements, max_elements);
   CHECK_EQ(num_elements, indices.index_count());
   auto root_data = root_piece().data<NativeT>();
-  root_data.remove_suffix(max_elements - values.size());
+  // Piece::data() returns an ArraySlice of size equal to the number of indices
+  // in the SparseIndexArray. So there is no need to adjust the size of the data
+  // here. It is enough to just copy the incoming values into the data buffer.
   std::copy(values.begin(), values.end(), root_data.begin());
   *this->root_piece().sparse_indices() = std::move(indices);
   if (sort) {
     auto root_data = this->root_piece().data<NativeT>();
-    root_data.remove_suffix(root_data.size() - num_elements);
     this->root_piece().sparse_indices()->SortWithValues(root_data);
   }
   DCHECK(this->root_piece().sparse_indices()->Validate(shape()));
