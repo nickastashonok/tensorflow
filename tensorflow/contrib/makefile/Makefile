@@ -307,32 +307,28 @@ ifeq ($(TARGET),ANDROID)
 	ifndef NDK_ROOT
     $(error "NDK_ROOT is not defined.")
 	endif
-	CXX := $(CC_PREFIX) $(NDK_ROOT)/toolchains/$(TOOLCHAIN)/prebuilt/$(ANDROID_HOST_OS_ARCH)/bin/$(BIN_PREFIX)-g++
-	CC := $(CC_PREFIX) $(NDK_ROOT)/toolchains/$(TOOLCHAIN)/prebuilt/$(ANDROID_HOST_OS_ARCH)/bin/$(BIN_PREFIX)-gcc
+	CXX := $(ANDROID_TOOLCHAIN)/bin/$(ANDROID_HOST)-clang++
+	CC := $(ANDROID_TOOLCHAIN)/bin/$(ANDROID_HOST)-clang
 	CXXFLAGS +=\
---sysroot $(NDK_ROOT)/platforms/android-21/arch-$(SYSROOT_ARCH) \
+--sysroot $(ANDROID_TOOLCHAIN)/sysroot \
 -Wno-narrowing \
 -fomit-frame-pointer \
-$(MARCH_OPTION) \
 -fPIE \
 -fPIC
 	INCLUDES = \
--I$(NDK_ROOT)/sources/android/support/include \
--I$(NDK_ROOT)/sources/cxx-stl/gnu-libstdc++/4.9/include \
--I$(NDK_ROOT)/sources/cxx-stl/gnu-libstdc++/4.9/libs/$(ANDROID_ARCH)/include \
 -I. \
 -I$(MAKEFILE_DIR)/downloads/ \
 -I$(MAKEFILE_DIR)/downloads/eigen \
 -I$(MAKEFILE_DIR)/downloads/gemmlowp \
 -I$(MAKEFILE_DIR)/downloads/nsync/public \
 -I$(MAKEFILE_DIR)/downloads/fft2d \
--I$(MAKEFILE_DIR)/gen/protobuf_android/$(ANDROID_ARCH)/include \
+-I$(MAKEFILE_DIR)/gen/protobuf_android/distribution/include \
 -I$(PROTOGENDIR) \
 -I$(PBTGENDIR)
 
 	LIBS := \
-$(TARGET_NSYNC_LIB) \
--lgnustl_static \
+-lnsync \
+-lc++_static \
 -lprotobuf \
 -llog \
 -lz \
@@ -340,17 +336,17 @@ $(TARGET_NSYNC_LIB) \
 -ldl \
 -latomic
 
-	LD := $(NDK_ROOT)/toolchains/$(TOOLCHAIN)/prebuilt/$(ANDROID_HOST_OS_ARCH)/$(BIN_PREFIX)/bin/ld
+	LD := $(ANDROID_TOOLCHAIN)/bin/ld
 
 	LDFLAGS := \
 $(MARCH_OPTION) \
--L$(MAKEFILE_DIR)/gen/protobuf_android/$(ANDROID_ARCH)/lib \
--L$(NDK_ROOT)/sources/cxx-stl/gnu-libstdc++/4.9/libs/$(ANDROID_ARCH) \
+-L$(MAKEFILE_DIR)/gen/nsync/distribution/lib \
+-L$(MAKEFILE_DIR)/gen/protobuf_android/distribution/lib \
 -fPIE \
 -pie \
 -v
 
-	AR := $(NDK_ROOT)/toolchains/$(TOOLCHAIN)/prebuilt/$(ANDROID_HOST_OS_ARCH)/bin/$(BIN_PREFIX)-ar
+	AR := $(ANDROID_TOOLCHAIN)/bin/$(ANDROID_HOST)-ar
 	ARFLAGS := r
 	LIBFLAGS += -Wl,--allow-multiple-definition -Wl,--whole-archive
 
